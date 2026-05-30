@@ -1,0 +1,156 @@
+import scanpy as sc
+import pandas as pd
+import numpy as np
+
+%config InlineBackend.figure_format = 'retina'
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(4, 4))
+
+Immu = sc.read('Finalshell1.0/pancancer/20251201/OOC7/Immu_0928.h5ad')
+
+CD4 = Immu[Immu.obs['cluster'].isin(['CD4 T cells'])]
+CD4
+
+import bbknn
+
+sc.pp.normalize_total(CD4, target_sum=1e4)
+
+sc.pp.log1p(CD4)
+
+sc.pp.highly_variable_genes(CD4, min_mean=0.0125, max_mean=5, min_disp=0, n_top_genes=2000)
+
+CD4.raw = CD4
+CD4 = CD4[:, CD4.var.highly_variable]
+
+sc.pp.regress_out(CD4, ['total_counts', 'pct_counts_mt'])
+sc.pp.scale(CD4, max_value=10)
+
+sc.tl.pca(CD4, svd_solver='arpack')
+sc.pl.pca_variance_ratio(CD4, log=True)
+
+sc.external.pp.bbknn(CD4, batch_key= "sample",n_pcs=20,neighbors_within_batch = 1)
+
+sc.tl.umap(CD4)
+
+sc.tl.leiden(CD4,resolution = 1)
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(CD4, color='leiden',legend_loc='on data')
+
+sc.tl.rank_genes_groups(CD4, 'leiden', method='wilcoxon')
+
+DEG = sc.get.rank_genes_groups_df(CD4, group = None, pval_cutoff = 0.05, log2fc_min = 0)
+
+DEG.to_csv('Finalshell1.0/pancancer/20251201/OOC7/DEG_CD4.csv')
+
+CD4.obs['cluster'] = CD4.obs['leiden']
+
+cluster_names = {'0':'Tregs',
+                     '1':'Memory CD4 T cells',
+                     '2':'Memory CD4 T cells',
+                     '3':'Naïve CD4 T cells', 
+                     '4':'Tregs', 
+                     '5':'Tregs',
+                     '6':'Tfh',
+                     '7':'Naïve CD4 T cells',
+                     '8':'Tregs',
+                     '9':'Doublets',
+                     '10':'Memory CD4 T cells',}
+
+CD4.obs = CD4.obs.replace({'cluster': cluster_names})
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(CD4, color='cluster',legend_loc='on data')
+
+CD4_filtered = CD4[~CD4.obs['cluster'].isin(['Doublets'])]
+CD4_filtered
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(CD4_filtered, color='cluster',legend_loc='on data')
+
+CD4_filtered = CD4_filtered.raw.to_adata()
+CD4_filtered
+
+marker_genes = ['CCR7','LEF1', 'TCF7',
+                "IL32", "LTB",
+                'CXCL13','PDCD1',
+                'FOXP3','IL2RA','CTLA4']
+
+# scale and store results in layer
+CD4_filtered.layers["scaled"] = sc.pp.scale(CD4_filtered, copy=True).X
+
+sc.pl.matrixplot(
+    CD4_filtered,
+    marker_genes,
+    "cluster",
+    dendrogram=False,
+    colorbar_title="mean z-score",
+    layer="scaled",
+    vmin=-1,
+    vmax=1,
+    cmap="RdBu_r",
+    show = False
+)
+
+plt.savefig("Figures/marker_gene_CD4.pdf",bbox_inches = 'tight')
+
+Macrophages_Immunecells_filtered = sc.read("Finalshell1.0/data/Macrophages_Immunecells_filtered.h5ad")
+
+CD4_filtered.obs['cluster_cpdb'] = CD4_filtered.obs['cluster']
+Macrophages_Immunecells_filtered.obs['cluster_cpdb'] = Macrophages_Immunecells_filtered.obs['cluster06']
+
+CD4_filtered.obs.set_index('index', inplace=True)
+Macrophages_Immunecells_filtered.obs.set_index('index', inplace=True)
+
+merge = {"CD4":CD4_filtered, "Macrophages":Macrophages_Immunecells_filtered}
+merge = sc.concat((merge),join="outer",label="cell_type")
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr
+
+# 1. 使用 pd.crosstab 快速统计每个 sample 中所有细胞亚群的数量
+# 每一行是一个 sample，每一列是一个 cluster，值是细胞数量
+cell_counts = pd.crosstab(merge.obs['sample'], merge.obs['cluster_cpdb'])
+
+# 2. 定义你要计算分母的两个大类的 cluster 列表
+cd4_t_clusters = ['Tregs', 'Memory CD4 T cells', 'Tfh', 'Naïve CD4 T cells']
+mac_clusters = ['SPP1+', 'CXCL9+', 'IL1B+']
+
+# 3. 计算每个 sample 的 CD4 T 细胞总数 和 巨噬细胞总数
+cd4_total = cell_counts[[c for c in cd4_t_clusters if c in cell_counts.columns]].sum(axis=1)
+mac_total = cell_counts[[c for c in mac_clusters if c in cell_counts.columns]].sum(axis=1)
+
+# 4. 计算占比，并在最后乘以 100 转换为百分比数值 (0-100)
+il1b_prop = (cell_counts.get('IL1B+', 0) / mac_total).fillna(0) * 100
+tregs_prop = (cell_counts.get('Tregs', 0) / cd4_total).fillna(0) * 100
+
+# 5. 合并为 DataFrame，更新列名
+data = pd.DataFrame({
+    'IL1B+ percentage': il1b_prop,
+    'Tregs percentage': tregs_prop
+})
+
+# 6. 绘制散点图和趋势线
+plt.figure(figsize=(8, 6))
+sns.regplot(x='IL1B+ percentage', y='Tregs percentage', data=data, 
+            scatter_kws={'s': 50}, line_kws={'color': 'red'})
+
+# 进行 Spearman 相关性分析
+corr, p_value = spearmanr(data['IL1B+ percentage'], data['Tregs percentage'])
+
+# 7. 在图中标注相关系数和 p 值，并更新坐标轴标签为百分比
+plt.title(f'Spearman correlation: {corr:.2f}, p-value: {p_value:.3e}')
+plt.xlabel('IL-1β+ proportion in Macrophages (%)')
+plt.ylabel('Tregs proportion in CD4+ T cells (%)')
+
+# 8. (可选) 严格限制坐标轴的显示范围，留出一点余量 (-5 到 105) 会让边缘的点更好看
+# plt.xlim(-5, 105)
+# plt.ylim(-5, 105)
+
+plt.tight_layout()
+plt.savefig('./pancancer/20251201/Figures/IL1B_Treg_proportion_correlation.pdf')
+plt.show()
+
+
