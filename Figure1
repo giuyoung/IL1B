@@ -31,3 +31,252 @@ sc.external.pp.bbknn(pan_new, batch_key= "sample",n_pcs=10)
 sc.tl.umap(pan_new)
 
 sc.tl.leiden(pan_new,resolution = 2)
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(pan_new, color='leiden',legend_loc='on data')
+
+pan_new.obs['cluster'] = pan_new.obs['leiden']
+
+cluster_names = {'0':'Tumor cells', 
+                 '1':'Immmune cells', 
+                 '2':'Immmune cells',
+                 '3':'Immmune cells', 
+                 '4':'Immmune cells', 
+                 '5':'Immmune cells',
+                 '6':'Fibroblasts', 
+                 '7':'Immmune cells', 
+                 '8':'Immmune cells',
+                 '9':'Tumor cells',
+                 '10':'Immmune cells',
+                 '11':'Tumor cells',
+                 '12':'Immmune cells',
+                 '13':'Immmune cells',
+                 '14':'Tumor cells', 
+                 '15':'Immmune cells', 
+                 '16':'Immmune cells',
+                 '17':'Immmune cells', 
+                 '18':'Fibroblasts', 
+                 '19':'Immmune cells',
+                 '20':'Immmune cells', 
+                 '21':'Tumor cells', 
+                 '22':'Immmune cells',
+                 '23':'Endothelial cells',
+                 '24':'Immmune cells',
+                 '25':'Immmune cells',                 
+                 '26':'Immmune cells',
+                 '27':'Tumor cells',
+                 '28':'Fibroblasts',
+                 '29':'Endothelial cells',
+                 '30':'Immmune cells', 
+                 '31':'Fibroblasts', 
+                 '32':'Immmune cells'}
+
+pan_new.obs = pan_new.obs.replace({'cluster': cluster_names})
+
+sc.pl.umap(pan_new, color="cluster", legend_loc="on data", show = False)
+
+marker_genes = ['EPCAM', 'KRT5',
+                'PECAM1', 'VWF',
+                'COL3A1', 'ACTA2','COL1A1',
+                'PTPRC']
+
+# scale and store results in layer
+pan_new.layers["scaled"] = sc.pp.scale(pan_new, copy=True).X
+
+sc.pl.matrixplot(
+    pan_new,
+    marker_genes,
+    "cluster",
+    dendrogram=False,
+    colorbar_title="mean z-score",
+    layer="scaled",
+    vmin=-2,
+    vmax=2,
+    cmap="RdBu_r",
+    show = False
+)
+
+plt.savefig("Figures/marker_gene_pan.pdf",bbox_inches = 'tight')
+
+sc.pl.umap(pan_new,
+           color=['EPCAM','KRT5','PECAM1','VWF','COL3A1','ACTA2','COL1A1','PTPRC'],
+           legend_loc='on data',
+           show = False)
+
+plt.savefig("Figures/marker_gene_UMAP_pan.pdf",bbox_inches = 'tight')
+
+sc.pl.umap(
+    pan_new,
+    color=['cancer_type','study'],
+    show=False
+)
+
+plt.tight_layout()
+plt.savefig("Figures/umap_after_bbknn_study.pdf", bbox_inches='tight')
+
+pan_new = sc.read('OOC7/pan_0928.h5ad')
+
+sc.pp.neighbors(pan_new, n_pcs=10)
+
+sc.tl.umap(pan_new)
+
+sc.pl.umap(
+    pan_new,
+    color=['cancer_type','study'],
+    show=False
+)
+
+plt.tight_layout()
+plt.savefig("Figures/umap_before_bbknn.pdf", bbox_inches='tight')
+
+pan_new = sc.read('Finalshell1.0/pancancer/20251201/OOC7/pan_0928.h5ad')
+pan_new
+
+Tumor = pan_new[pan_new.obs['cluster'].isin(['Tumor cells'])]
+Tumor
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scanpy as sc
+import scipy as sp
+import numpy as np
+import warnings
+
+# NB these new packages
+import scvelo as scv
+import cellrank as cr
+
+sc.settings.set_figure_params(dpi=80)
+warnings.filterwarnings('ignore')
+
+%config InlineBackend.figure_format = 'retina'
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(4, 4))
+
+sc.pp.normalize_per_cell(Tumor, counts_per_cell_after=1e4)
+sc.pp.log1p(Tumor)
+sc.pp.highly_variable_genes(Tumor, min_mean=0.0125, max_mean=5, min_disp=0.25)
+
+# This is a necessary hack. See CellRank docs
+Tumor.layers["spliced"] = Tumor.X
+Tumor.layers["unspliced"] = Tumor.X
+scv.pp.moments(Tumor, n_pcs=30, n_neighbors=30)
+
+from cellrank.kernels import CytoTRACEKernel
+ctk = CytoTRACEKernel(Tumor).compute_cytotrace()
+
+Tumor.obs['cluster'] = Tumor.obs['leiden']
+
+cluster_names = {'0':'Tumor cells 1', 
+                   '9':'Tumor cells 2',
+                   '11':'Tumor cells 3',
+                   '14':'Tumor cells 4',
+                   '21':'Tumor cells 5', 
+                   '27':'Tumor cells 6'}
+
+Tumor.obs = Tumor.obs.replace({'cluster': cluster_names})
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10, 10))
+sc.pl.umap(Tumor, color=['cluster',"ct_score"],legend_loc='on data',color_map="gnuplot2",show = False)
+plt.savefig("Figures/umap_cytotrace.pdf")
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10, 10))
+sc.pl.violin(
+    Tumor, 
+    keys=["ct_score", "ct_pseudotime"], 
+    groupby="cluster", 
+    rotation=90,
+    palette="gnuplot2",   # 改成 palette 而不是 color_map
+    show=False
+)
+plt.savefig("Figures/violin_cytotrace.pdf")
+
+ctk.compute_transition_matrix(threshold_scheme="soft", nu=0.5)
+
+ctk.plot_projection(basis="umap")
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10, 10))
+scv.pl.velocity_embedding_stream(
+    Tumor, color="cluster", vkey="T_fwd", basis="umap", legend_loc="on data",
+    show=False
+)
+
+plt.grid(False)     # 关闭网格线
+plt.savefig("Figures/cellrank.png", dpi=300, bbox_inches="tight")
+
+import sctour as sct
+
+Tumor = sc.read('OOC7/Tumor_0928.h5ad')
+Tumor
+
+sc.pp.calculate_qc_metrics(Tumor, percent_top=None, log1p=False, inplace=True)
+
+sc.pp.highly_variable_genes(Tumor, subset=True)
+
+Tumor.X = Tumor.X.astype('float32') # convert data to float32 type
+tnode = sct.train.Trainer(Tumor, loss_mode='mse')
+tnode.train()
+
+Tumor.obs['ptime'] = tnode.get_time()
+
+#zs represents the latent z from variational inference, and pred_zs represents the latent z from ODE solver
+#mix_zs represents the weighted combination of the two, which is used for downstream analysis
+mix_zs, zs, pred_zs = tnode.get_latentsp(alpha_z=0.5, alpha_predz=0.5)
+Tumor.obsm['X_TNODE'] = mix_zs
+
+Tumor.obsm['X_VF'] = tnode.get_vector_field(Tumor.obs['ptime'].values, Tumor.obsm['X_TNODE'])
+
+Tumor = Tumor[np.argsort(Tumor.obs['ptime'].values), :]
+
+sc.pl.umap(Tumor, color='ptime', show=False, frameon=False)
+plt.savefig("Figures/sctour_ptime.pdf",bbox_inches = 'tight')
+
+Tumor.obs['cluster02'] = Tumor.obs['leiden']
+cluster02_names = {'0':'Tumor cells',
+                   '9':'Tumor cells',
+                   '11':'Tumor cells',
+                   '14':'Tumor stem cells',
+                   '21':'Tumor cells', 
+                   '27':'Tumor cells'}
+Tumor.obs = Tumor.obs.replace({'cluster02': cluster02_names})
+
+Tumor.layers['counts'] = Tumor.X # Save raw counts
+
+# preprocessing
+sc.pp.normalize_total(Tumor, target_sum=1e4)
+sc.pp.log1p(Tumor)
+Tumor.layers['lognorm'] = Tumor.X
+
+# set STIM as class 0, CTRL as class 1, to make categorical
+Tumor.obs['cluster02'] = pd.Categorical(Tumor.obs['cluster02'], categories=["Tumor stem cells", "Tumor cells"], ordered=True)
+
+indices = Tumor.obs.sort_values(['cluster02']).index
+Tumor = Tumor[indices,:]
+
+import gseapy as gp
+# simple plotting function
+from gseapy.plot import barplot, dotplot
+
+names = gp.get_library_name()  # default: Human
+
+res_KEGG = gp.gsea(data=Tumor.to_df().T, # row -> genes, column-> samples
+        gene_sets="KEGG_2021_Human",
+        cls=Tumor.obs.cluster02,
+        permutation_num=1000,
+        permutation_type='phenotype',
+        outdir=None,
+        method='s2n')
+
+res_KEGG.res2d.to_csv('./pancancer/20251201/OOC7/gsea_tumor_KEGG_OOC7.csv')
+
+res_GO = gp.gsea(data=Tumor.to_df().T, # row -> genes, column-> samples
+        gene_sets="GO_Biological_Process_2023",
+        cls=Tumor.obs.cluster02,
+        permutation_num=1000,
+        permutation_type='phenotype',
+        outdir=None,
+        method='s2n', # signal_to_noise
+        threads= 16)
+
+res_GO.res2d.to_csv('./pancancer/20251201/OOC7/gsea_tumor_GO_OOC7.csv')
