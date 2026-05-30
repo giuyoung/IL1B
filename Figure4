@@ -1,1 +1,210 @@
+import scanpy as sc
+import pandas as pd
+import numpy as np
 
+%config InlineBackend.figure_format = 'retina'
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(4, 4))
+
+import os
+os.chdir("/home/zhanglz3")
+os.getcwd()
+
+pan_new = sc.read('Finalshell1.0/pancancer/OOC7/pan_0928.h5ad')
+
+pan_new = pan_new.raw.to_adata()
+pan_new
+
+Immu = pan_new[pan_new.obs['cluster'].isin(['Immmune cells'])]
+Immu
+
+sc.pp.normalize_total(Immu, target_sum=1e4)
+
+sc.pp.log1p(Immu)
+
+sc.pp.highly_variable_genes(Immu, min_mean=0.0125, max_mean=5, min_disp=0, n_top_genes=2000)
+
+Immu.raw = Immu
+
+Immu = Immu[:, Immu.var.highly_variable]
+
+sc.pp.regress_out(Immu, ['total_counts', 'pct_counts_mt'])
+
+sc.pp.scale(Immu, max_value=10)
+
+sc.tl.pca(Immu, svd_solver='arpack')
+sc.pl.pca_variance_ratio(Immu, log=True)
+
+sc.external.pp.bbknn(Immu, batch_key= "sample",n_pcs=50)
+
+sc.tl.umap(Immu)
+
+sc.tl.leiden(Immu,resolution = 2)
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(Immu, color='leiden',legend_loc='on data')
+
+sc.tl.rank_genes_groups(Immu, 'leiden', method='wilcoxon')
+
+DEG = sc.get.rank_genes_groups_df(Immu, group = None, pval_cutoff = 0.05, log2fc_min = 0)
+
+DEG.to_csv('Finalshell1.0/pancancer/OOC7/DEG_Immu.csv')
+
+sc.pl.dotplot(Immu,['CD3D', 'CD3E', 
+                    'CD8A','CD8B',
+                    'NKG7', 'KLRD1',
+                    'CD4','CD40LG','FOXP3',
+                    'CD79A', 'CD79B', 'MS4A1', 
+                    'JCHAIN','MZB1','XBP1',
+                    'CD163','AIF1','CD68',
+                    'CLEC9A','CD1C',
+                    'LILRA4','IL3RA',
+                    'TPSB2','TPSAB1'], groupby='leiden')
+
+Immu.obs['cluster'] = Immu.obs['leiden']
+
+cluster_names = {'0':'CD8 T cells', 
+                 '1':'CD4 T cells', 
+                 '2':'CD8 T cells',
+                 '3':'CD4 T cells', 
+                 '4':'Plasma cells', 
+                 '5':'CD8 T cells',
+                 '6':'CD4 T cells', 
+                 '7':'B cells', 
+                 '8':'CD8 T cells',
+                 '9':'CD8 T cells',
+                 '10':'CD4 T cells',
+                 '11':'CD4 T cells',
+                 '12':'Macrophages',
+                 '13':'Macrophages',
+                 '14':'B cells', 
+                 '15':'NK cells', 
+                 '16':'Macrophages',
+                 '17':'Macrophages', 
+                 '18':'NK cells', 
+                 '19':'cDCs',
+                 '20':'cDCs', 
+                 '21':'CD4 T cells', 
+                 '22':'Mast cells',
+                 '23':'CD4 T cells',
+                 '24':'pDCs',
+                 '25':'CD4 T cells',                 
+                 '26':'Doublets'}
+
+Immu.obs = Immu.obs.replace({'cluster': cluster_names})
+
+sc.pl.umap(Immu, color="cluster", legend_loc="on data", show = False)
+
+Immu = Immu.raw.to_adata()
+Immu
+
+Immu_filtered = Immu[~Immu.obs['cluster'].isin(['Doublets'])]
+Immu_filtered
+
+import matplotlib.pyplot as plt
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(Immu_filtered, color='cluster',legend_loc='on data',show=False)
+plt.savefig("Figures/UMAP_immune.pdf",bbox_inches = 'tight')
+
+# scale and store results in layer
+Immu_filtered.layers["scaled"] = sc.pp.scale(Immu_filtered, copy=True).X
+
+sc.pl.matrixplot(
+    Immu_filtered,
+    marker_genes,
+    "cluster",
+    dendrogram=False,
+    colorbar_title="mean z-score",
+    layer="scaled",
+    vmin=-2,
+    vmax=2,
+    cmap="RdBu_r",
+    show = False
+)
+
+plt.savefig("Figures/marker_gene_immune.pdf",bbox_inches = 'tight')
+
+Macrophages_Immunecells = Immunecells[Immunecells.obs['cluster05'].isin(['Macrophages'])]
+Macrophages_Immunecells
+
+Macrophages_Immunecells = Macrophages_Immunecells.raw.to_adata()
+Macrophages_Immunecells
+
+# 选择不以"MT-"、"RPL"、"RPS"开头的基因
+mito_genes = Macrophages_Immunecells.var_names.str.startswith('MT-')  # 线粒体基因
+ribo_genes_L = Macrophages_Immunecells.var_names.str.startswith('RPL')  # 核糖体基因
+ribo_genes_S = Macrophages_Immunecells.var_names.str.startswith('RPS')  # 核糖体基因
+
+# 合并这些条件
+remove_genes = mito_genes | ribo_genes_L | ribo_genes_S
+
+# 去除这些基因
+Macrophages_Immunecells = Macrophages_Immunecells[:, ~remove_genes]
+
+import bbknn
+
+sc.pp.normalize_total(Macrophages_Immunecells, target_sum=1e4)
+
+sc.pp.log1p(Macrophages_Immunecells)
+
+sc.pp.highly_variable_genes(Macrophages_Immunecells, min_mean=0.0125, max_mean=5, min_disp=0, n_top_genes=2000)
+
+Macrophages_Immunecells.raw = Macrophages_Immunecells
+
+Macrophages_Immunecells = Macrophages_Immunecells[:, Macrophages_Immunecells.var.highly_variable]
+
+sc.pp.regress_out(Macrophages_Immunecells, ['total_counts', 'pct_counts_mt'])
+
+sc.pp.scale(Macrophages_Immunecells, max_value=10)
+
+sc.tl.pca(Macrophages_Immunecells, svd_solver='arpack')
+sc.pl.pca_variance_ratio(Macrophages_Immunecells, log=True)
+
+sc.external.pp.bbknn(Macrophages_Immunecells, batch_key= "sample",n_pcs=50,neighbors_within_batch = 1)
+
+sc.tl.umap(Macrophages_Immunecells)
+
+sc.tl.leiden(Macrophages_Immunecells,resolution = 1)
+
+Macrophages_Immunecells.obs['cluster06'] = Macrophages_Immunecells.obs['leiden']
+
+cluster06_names = {'0':'SPP1+', '1':'IL1B+', '2':'SPP1+',
+                   '3':'CXCL9+', '4':'Monocytes', '5':'IL1B+',
+                   '6':'SPP1+', '7':'SPP1+', '8':'Monocytes',
+                   '9':'CXCL9+', '10':'T cells', '11':'IL1B+',}
+
+Macrophages_Immunecells.obs = Macrophages_Immunecells.obs.replace({'cluster06': cluster06_names})
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(Macrophages_Immunecells, color='cluster06',legend_loc='on data', show =False)
+
+Macrophages_Immunecells_filtered = Macrophages_Immunecells[~Macrophages_Immunecells.obs['cluster06'].isin(['Monocytes','T cells'])]
+Macrophages_Immunecells_filtered
+
+sc.settings.set_figure_params(dpi=50, dpi_save=300, figsize=(10,10))
+sc.pl.umap(Macrophages_Immunecells_filtered, color='cluster06',legend_loc='on data', show =False)
+plt.savefig('Finalshell1.0/figure/umap_Mac.pdf')
+
+x = cross['CSCgroup']
+summ = cross['SPP1+']+cross['IL1B+']+cross['CXCL9+']
+y1 = cross['SPP1+']/summ
+y2 = cross['IL1B+']/summ
+y3 = cross['CXCL9+']/summ
+
+plt.bar(x,y1,width=0.4,label='SPP1',edgecolor='grey',zorder=5)
+plt.bar(x,y2,width=0.4,bottom = y1, label='IL1B',edgecolor='grey',zorder=5)
+plt.bar(x,y3,width=0.4,bottom = y1+y2,label='CXCL9',edgecolor='grey',zorder=5)
+plt.tick_params(axis='x',length=0)
+plt.xlabel('Group',fontsize=20)
+plt.ylabel('Proportion',fontsize=20)
+plt.ylim(0,1.01)
+plt.yticks(np.arange(0,1.2,0.2),[f'{i}%' for i in range(0,120,20)])
+plt.grid(axis='y',alpha=0.5,ls='--')
+# 添加图例，将图例移至图外
+plt.legend(frameon=False,bbox_to_anchor=(1.01,1))
+plt.show()
+
+sc.pl.dotplot(Macrophages_Immunecells_filtered, ['SPP1','APOE',
+                                                 'CXCL9','CXCL10',
+                                                 'IL1B','IL1A','NLRP3'], groupby='cluster06')
